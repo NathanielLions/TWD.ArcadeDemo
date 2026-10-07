@@ -566,7 +566,13 @@ const MOVES = {
   bubble:   { name: "BUBBLE", desc: "Blow a bubble shield around you: 2 turns.", target: "self", cd: 4, icon: "shield" },
   focus:    { name: "FOCUS", desc: "Your next attack or heal is doubled.", target: "self", cd: 3, icon: "prepare" },
   barrier:  { name: "BARRIER", desc: "Shield a squadmate for 2 turns.", target: "ally", cd: 4, icon: "shield" },
-  quake:    { name: "QUAKE", desc: "Stomp! Hit every Gloomy for 6.", target: "foes", cd: 4, icon: "weaken" }
+  quake:    { name: "QUAKE", desc: "Stomp! Hit every Gloomy for 6.", target: "foes", cd: 4, icon: "weaken" },
+  smash:    { name: "SMASH", desc: "A huge hit: 20 on one Gloomy.", target: "foe", cd: 3, icon: "strength" },
+  mend:     { name: "MEND", desc: "Patch yourself up: +14 energy.", target: "self", cd: 2, icon: "regen" },
+  warcry:   { name: "WAR CRY", desc: "The whole squad hits 50% harder for 2 turns.", target: "squad", cd: 5, icon: "strength" },
+  hex:      { name: "HEX", desc: "Hit 6. That Gloomy hits 40% softer for 2 turns.", target: "foe", cd: 2, icon: "weaken" },
+  // nothing else ready? you can always swing
+  swing:    { name: "SWING", desc: "Hit a Gloomy for 6. Always ready.", target: "foe", cd: 0, icon: "strength" }
 };
 const CLASSES = {
   guardian:  { name: "GUARDIAN",  energy: 35, moves: ["taunt", "meditate", "thorns"], blurb: "Tough. Pulls attacks off the squad.", color: "#6cb8ff" },
@@ -705,7 +711,8 @@ function gainXp(n, after) {
   sound.win();
   blessingChoice("LEVEL " + run.level + "!", "Squad: +4 max energy. Pick a blessing for yourself.", after);
 }
-const LEARN = ["bubble", "focus", "barrier", "quake"];
+const LEARN = ["bubble", "focus", "barrier", "quake", "smash", "mend", "warcry", "hex"];
+const moveSlotsFor = L => 1 + Math.floor(L / 3); // extra moves you can keep: 1, then +1 at levels 3, 6 and 9
 const BAG_SIZE = 3;
 // map: row 0 is the entrance, the last row is the boss
 const MAP_ROWS = 12, TURN_TIME = 20; // the entrance, 10 rooms, then the Wyrm
@@ -1289,8 +1296,9 @@ function learnMove(id, after) {
     if (drop) { me.moves = me.moves.filter(m => m !== drop); me.learnedList = me.learnedList.filter(m => m !== drop); }
     me.learnedList.push(id); me.moves.push(id); sound.buff(); after();
   };
-  if (me.learnedList.length < run.moveSlots) { add(null); return; }
-  openChoice("MOVES FULL", "You can keep " + run.moveSlots + " extra move" + (run.moveSlots > 1 ? "s" : "") + ". Swap one for " + MOVES[id].name + "?", [
+  const slots = moveSlotsFor(me.level);
+  if (me.learnedList.length < slots) { add(null); return; }
+  openChoice("MOVES FULL", "You can keep " + slots + " extra move" + (slots > 1 ? "s" : "") + " (level up for more). Swap one for " + MOVES[id].name + "?", [
     ...me.learnedList.map(old => ({ name: "FORGET " + MOVES[old].name, desc: MOVES[old].desc, art: FX_ART[MOVES[old].icon], tag: "OUT", pick: () => add(old) })),
     { name: "SKIP " + MOVES[id].name, desc: MOVES[id].desc, art: FX_ART[MOVES[id].icon], pick: () => after(), tag: "SKIP" }
   ], { def: me.learnedList.length });
@@ -1570,14 +1578,13 @@ function shrine() {
 }
 // Shop: a few random items, a heart and one move to learn
 function openShop() {
-  const n = 4 + run.act; // 5 items early on, 7 later
+  const n = 3 + run.act; // 4 items early on, 6 later
   const top = shuffle(itemPool().filter(id => tierOf(id) === run.act)), rest = shuffle(itemPool().filter(id => tierOf(id) < run.act));
   const owned = id => ITEMS[id].kind === "charm" && run.inv.includes(id); // no point selling you a charm you have
   const ids = (run.act === 1 ? shuffle(itemPool()) : [...top.slice(0, Math.ceil(n / 2)), ...rest]).filter(id => !owned(id)).slice(0, n);
   const stock = [{ kind: "level", id: "level" }, { kind: "heart", id: "heart" }];
   stock.push(...ids.sort((a, b) => ITEMS[a].cost - ITEMS[b].cost).map(id => ({ kind: "item", id, cost: ITEMS[id].cost, fresh: tierOf(id) === run.act && run.act > 1 })));
-  const mv = pick(LEARN.filter(m => !(you().learnedList || []).includes(m)));
-  if (mv) stock.push({ kind: "move", id: mv, cost: 16 });
+  for (const mv of shuffle(LEARN.filter(m => !(you().learnedList || []).includes(m))).slice(0, 2)) stock.push({ kind: "move", id: mv, cost: 16 });
   // Everyone shops with their own gems. Items and moves: one each per player. Levels and hearts: buy as many as you can afford.
   for (const x of stock) x.boughtBy = {};
   // the other players shop too (CPUs in this demo): they level up and top up hearts, then press READY
@@ -1624,8 +1631,8 @@ function cpuPlan(h) {
   if (has("sneak")) { const sh = alive(run.foes).find(u => u.fx.shield) || F; return { move: "sneak", target: sh }; }
   if (has("poison")) { const clean = alive(run.foes).find(u => !u.fx.poison) || F; return { move: "poison", target: clean }; }
   if (has("quake") && alive(run.foes).length > 2) return { move: "quake", target: null };
-  const basic = h.moves.find(id => MOVES[id].target === "foe" && ready(h, id)) || h.moves[0];
-  return { move: basic, target: MOVES[basic].target === "foe" ? F : h };
+  const basic = h.moves.find(id => MOVES[id].target === "foe" && ready(h, id)) || "swing";
+  return { move: basic, target: F };
 }
 
 /* ================= turn resolution ================= */
@@ -1661,8 +1668,8 @@ function beginActions() {
 }
 function autoPlan(h) {
   // time ran out: a basic move on the weakest Gloomy
-  const basic = h.moves.find(id => MOVES[id].target === "foe" && ready(h, id)) || h.moves[0];
-  return { move: basic, target: MOVES[basic].target === "foe" ? weakestFoe() : h };
+  const basic = h.moves.find(id => MOVES[id].target === "foe" && ready(h, id)) || "swing";
+  return { move: basic, target: weakestFoe() };
 }
 function nextAction() {
   if (checkEnd()) return;
@@ -1726,7 +1733,7 @@ function nextAction() {
 }
 function say(s) { run.log = s; run.logT = 2; }
 // ---------- timed presses: hit F in the green for a GREAT hit, or to GUARD when a Gloomy swings at you ----------
-const ATTACKS = new Set(["taunt", "strike", "sneak", "drain", "hack", "swipe", "ember", "lightning", "quake"]);
+const ATTACKS = new Set(["taunt", "strike", "sneak", "drain", "hack", "swipe", "ember", "lightning", "quake", "smash", "hex", "swing"]);
 const QTE_SWEEP = 0.85, QTE_GREAT = [0.66, 0.8], QTE_GOOD = [0.5, 0.9];
 function qteFor(a) {
   const me = you();
@@ -1866,7 +1873,7 @@ function knockOut(u) {
 function useMove(h, id, t) {
   const m = MOVES[id];
   if (m.cd) h.cds[id] = m.cd + 1 - (has(h, "quick") ? 1 : 0); // +1 because cooldowns tick down at the end of this round
-  const dbl = h.fx.prepare && ["heal", "regen", "drain", "rest", "meditate"].includes(id);
+  const dbl = h.fx.prepare && ["heal", "regen", "drain", "rest", "meditate", "mend"].includes(id);
   switch (id) {
     case "taunt": damage(h, t, 7); if (t.alive) { t.fx.lure = { by: h, n: 2 }; floatText(t, "TAUNTED", "#ff6b7a"); } break;
     case "meditate": h.fx.regen = { amt: dbl ? 12 : 6, n: 3 }; if (dbl) h.fx.prepare = 0; sound.buff(); floatText(h, "MEDITATE", "#8ee35a"); break;
@@ -1896,6 +1903,11 @@ function useMove(h, id, t) {
     case "focus": h.fx.prepare = 1; sound.buff(); floatText(h, "FOCUS", "#ff9f1c"); break;
     case "barrier": t.fx.shield = 2; sound.buff(); floatText(t, "SHIELD", "#9fc3ff"); break;
     case "quake": for (const u of alive(run.foes)) damage(h, u, 6, { aoe: true }); break;
+    case "smash": damage(h, t, 20); break;
+    case "mend": heal(h, dbl ? 28 : 14); if (dbl) h.fx.prepare = 0; sound.heal(); break;
+    case "warcry": for (const u of alive(run.heroes)) { u.fx.strength = 2; floatText(u, "STRONG!", "#ff9f1c"); } sound.buff(); break;
+    case "hex": damage(h, t, 6); if (t.alive) { t.fx.weaken = 2; floatText(t, "HEXED", "#9a8fc0"); } break;
+    case "swing": damage(h, t, 6); break;
   }
 }
 
@@ -2518,8 +2530,11 @@ function drawWyrmBody() {
   }
 }
 // the bottom panel: a list on the left, details on the right
+// can you pick this move right now? (a move with a cooldown can't be your 2nd action if it's already your 1st)
+function canPick(me, id) { const fp = firstPick(); return ready(me, id) && !(fp && fp.move === id && MOVES[id].cd > 0); }
 function menuEntries(me) {
   const list = me.moves.map(id => ({ kind: "move", id }));
+  if (!me.moves.some(id => canPick(me, id))) list.push({ kind: "move", id: "swing" });
   if (run.inv.some(id => ITEMS[id].kind === "use")) list.push({ kind: "bag" });
   return list;
 }
@@ -2528,12 +2543,12 @@ function bagEntries() { return bagIds().filter(id => ITEMS[id].kind === "use").m
 function firstPick() { const me = run.heroes[run.planIdx]; return me && actionsFor(me) > 1 ? (run.plans[me.slot] || [])[0] : null; }
 const secondPick = () => !!firstPick();
 function listRow(i, sel, art, name, right, rightCol, dim) {
-  const tight = run.phase === "plan" && menuEntries(run.heroes[run.planIdx] || you()).length > 5;
-  const y = 177 + i * (tight ? 10 : 12), cy = secondPick();
-  box(4, y, 116, tight ? 10 : 11, sel ? (cy ? "#123a4a" : "#3a2a6a") : "#150f28", sel ? (cy ? "#5ec8ff" : "#ffd23f") : null);
+  const tight = false;
+  const y = 177 + i * 12, cy = secondPick();
+  box(4, y, 110, tight ? 10 : 11, sel ? (cy ? "#123a4a" : "#3a2a6a") : "#150f28", sel ? (cy ? "#5ec8ff" : "#ffd23f") : null);
   if (art) drawArt(art, 7, y + (art.length > 5 ? 1.5 : 3), art.length > 5 ? 1 : 1);
   txt(name, 18, y + 2, dim ? "#6a5f8a" : sel && cy ? "#bff2ff" : "#ffffff", "left", 8, null);
-  if (right) txt(right, 117, y + 2, rightCol, "right", 8, null);
+  if (right) txt(right, 112, y + 2, rightCol, "right", 8, null);
 }
 function detail(title, sub, desc, titleCol = "#ffd23f") {
   box(124, 176, 192, 61, "#150f28", "#3a2a66");
@@ -2547,14 +2562,21 @@ function drawPanel() {
   if (run.phase === "plan" && me) {
     const list = menuEntries(me);
     const fp = firstPick();
-    list.forEach((e, i) => {
+    run.menu = Math.min(run.menu, list.length - 1);
+    const first = clamp(run.menu - 4, 0, Math.max(0, list.length - 5));
+    list.slice(first, first + 5).forEach((e, k) => {
+      const i = first + k, row = k;
       if (e.kind === "bag") {
         const uses = run.inv.filter(id => ITEMS[id].kind === "use").length - (fp && fp.item ? 1 : 0); // items left after your 1st pick
-        listRow(i, i === run.menu, ITEM_ART.tonic, "BAG", uses > 0 ? uses + "" : "1ST", uses > 0 ? "#9fe8ff" : "#6a5f8a", uses <= 0); return;
+        listRow(row, i === run.menu, ITEM_ART.tonic, "BAG", uses > 0 ? uses + "" : "1ST", uses > 0 ? "#9fe8ff" : "#6a5f8a", uses <= 0); return;
       }
-      const m = MOVES[e.id], cd = me.cds[e.id] || 0, locked = fp && fp.move === e.id;
-      listRow(i, i === run.menu, FX_ART[m.icon], m.name, locked ? "1ST" : cd > 0 ? "W" + cd : "", locked ? "#9a8fc0" : "#ff9f1c", cd > 0 || locked);
+      const m = MOVES[e.id], cd = me.cds[e.id] || 0, locked = fp && fp.move === e.id && m.cd > 0;
+      listRow(row, i === run.menu, FX_ART[m.icon], m.name, locked ? "1ST" : cd > 0 ? "W" + cd : "", locked ? "#9a8fc0" : "#ff9f1c", cd > 0 || locked);
     });
+    // more moves above/below: little arrows beside the list
+    ctx.fillStyle = "#ffd23f";
+    if (first > 0) { ctx.fillRect(116, 179, 5, 1); ctx.fillRect(117, 178, 3, 1); ctx.fillRect(118, 177, 1, 1); }
+    if (first + 5 < list.length) { ctx.fillRect(116, 233, 5, 1); ctx.fillRect(117, 234, 3, 1); ctx.fillRect(118, 235, 1, 1); }
     const e = list[run.menu];
     if (actionsFor(me) > 1) {
       // what you've picked so far: 1st (locked in) and 2nd (picking now)
@@ -2728,7 +2750,9 @@ function updateBattle(dt) {
     run.roundT += dt;
     for (const h of run.heroes) if (!h.human && canAct(h) && !planCount(h) && run.roundT >= run.readyAt[h.slot] && !lagging(h.slot)) {
       run.plans[h.slot] = [];
-      for (let k = 0; k < actionsFor(h); k++) run.plans[h.slot].push(cpuPlan(h));
+      const saved = Object.assign({}, h.cds); // don't plan the same cooldown move twice
+      for (let k = 0; k < actionsFor(h); k++) { const pl = cpuPlan(h); run.plans[h.slot].push(pl); if (MOVES[pl.move] && MOVES[pl.move].cd) h.cds[pl.move] = 1; }
+      h.cds = saved;
       run.lockAt[h.slot] = run.roundT; // locked in: the sooner, the earlier they act
       sound.blip();
     }
@@ -2754,8 +2778,7 @@ function updateBattle(dt) {
         run.phase = "bag"; run.bagIdx = 0; sound.pick(); return;
       }
       if (!ready(me, e.id)) { sound.nope(); say("THAT MOVE IS STILL RESTING."); return; }
-      const fp = firstPick();
-      if (fp && fp.move === e.id) { sound.nope(); say("THAT'S YOUR 1ST ACTION. PICK ANOTHER."); return; }
+      if (!canPick(me, e.id)) { sound.nope(); say("THAT'S YOUR 1ST ACTION. PICK ANOTHER."); return; }
       choose(me, { kind: "move", id: e.id, target: MOVES[e.id].target });
     }
   } else if (run.phase === "bag") {
@@ -2984,7 +3007,7 @@ function shopDesc(s) {
   if (s.kind === "heart") return "+1 heart. You have " + heartSlots(you().level) + " heart slots (level up for more).";
   if (s.kind === "level") {
     const L = you().level;
-    return "LV" + L + " -> LV" + (L + 1) + ": +4 max energy" + (bagFor(L + 1) > bagFor(L) ? ", +1 bag slot" : "") + (heartSlots(L + 1) > heartSlots(L) ? ", +1 HEART SLOT" : "") + (doublesFor(L + 1) > doublesFor(L) ? ", +1 DOUBLE ATTACK each wave" : "") + ".";
+    return "LV" + L + " -> LV" + (L + 1) + ": +4 max energy" + (bagFor(L + 1) > bagFor(L) ? ", +1 bag slot" : "") + (heartSlots(L + 1) > heartSlots(L) ? ", +1 HEART SLOT" : "") + (moveSlotsFor(L + 1) > moveSlotsFor(L) ? ", +1 MOVE SLOT" : "") + (doublesFor(L + 1) > doublesFor(L) ? ", +1 DOUBLE ATTACK each wave" : "") + ".";
   }
   return MOVES[s.id].desc;
 }
@@ -3027,6 +3050,7 @@ function drawShop() {
       txt(tag[0], gx + 14, y + 41 + lift, tag[1], "left", 8, null);
     }
     if (s.fresh && !dim) txt("NEW", x + CARD_W - 3, y + 3 + lift, "#ff7ad9", "right", 8, null);
+    if (s.kind === "move" && !dim) txt((me.learnedList || []).length + "/" + moveSlotsFor(me.level), x + CARD_W - 3, y + 3 + lift, "#9fd0ff", "right", 8, null);
     if (s.kind === "heart" && !dim) txt(me.hearts + "/" + heartSlots(me.level), x + CARD_W - 3, y + 3 + lift, "#ff8a94", "right", 8, null);
   });
   const s = cards[sh.cursor];
@@ -3048,7 +3072,7 @@ function drawShop() {
     else if (s.kind === "heart" && heartsFull()) warn = ["HEART SLOTS FULL: LEVEL UP FOR MORE", "#ff8a94"];
     else if (s.kind === "level" && me.level >= MAX_LEVEL) warn = ["YOU'RE AT THE TOP LEVEL", "#8ee35a"];
     else if (s.kind === "item" && !canCarry(s.id)) warn = ["BAG FULL: YOU'LL PICK WHAT TO DROP", "#ff9f1c"];
-    else if (s.kind === "move" && (me.learnedList || []).length >= run.moveSlots) warn = ["YOU'LL PICK WHICH MOVE TO KEEP", "#ff9f1c"];
+    else if (s.kind === "move" && (me.learnedList || []).length >= moveSlotsFor(me.level)) warn = ["YOU'LL PICK WHICH MOVE TO KEEP", "#ff9f1c"];
     wrap(shopDesc(s), 292).slice(0, warn ? 1 : 2).forEach((l, i) => txt(l, 14, 195 + i * 11, "#e9e3ff", "left", 8, null));
     if (warn) txt(warn[0], 14, 207, warn[1], "left", 8, null);
   }
@@ -3178,7 +3202,7 @@ function drawHowto() {
     txt("Too early = miss. Watch, then tap!", W / 2, 166, "#9a8fc0", "center", 8, null);
   } else {
     txt("THE WAVES", 16, 32, "#c24bd9", "left", 8, null);
-    ["Beat every Gloomy to clear a wave.", "Every 5th wave is a BOSS!", "SHOP after each wave: your gems.", "LEVEL UP: more energy, bag slots", "  and DOUBLE ATTACKS (act twice).", "HEARTS: 3 each. LEVELS add slots.", "Lose them all and you're out,", "  but your squad keeps going!", "Every role has a PERK.", "FIRST TO LOCK IN ACTS FIRST!"].forEach((l, i) => txt(l, 16, 46 + i * 13, "#e9e3ff", "left", 8, null));
+    ["Beat every Gloomy to clear a wave.", "Every 5th wave is a BOSS!", "SHOP: levels, hearts, items, MOVES.", "LEVEL UP: more energy, bag slots", "  and DOUBLE ATTACKS (act twice).", "HEARTS: 3 each. LEVELS add slots.", "Lose them all and you're out,", "  but your squad keeps going!", "Every role has a PERK.", "FIRST TO LOCK IN ACTS FIRST!"].forEach((l, i) => txt(l, 16, 46 + i * 13, "#e9e3ff", "left", 8, null));
   }
   if (Math.floor(now * 2) % 2 === 0) txt(pg < HOWTO_PAGES - 1 ? "F: NEXT" : "F: LET'S GO!", W / 2, 208, "#ffffff", "center");
   txt("G: BACK", W / 2, 224, "#5a4f7a", "center");
